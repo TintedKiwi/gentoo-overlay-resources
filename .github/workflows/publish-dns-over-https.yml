@@ -1,0 +1,68 @@
+name: Publish Vendor Files Tarball - dns-over-https
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream release tag specifying which version's vendor files to fetch and package (e.g. v2.3.10)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  publish-vendor-files:
+    name: Publish dns-over-https vendor files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+
+      - name: Clone upstream repository
+        run: |
+          git clone --depth 1 https://github.com/m13253/dns-over-https upstream
+          cd upstream
+          git fetch --tags
+          git checkout "${{ github.event.inputs.tag }}"
+          echo "Checked out upstream tag:"
+          git describe --tags
+
+      - name: Download Go modules
+        working-directory: upstream
+        run: go mod vendor
+
+      - name: Prepare vendor files tarball
+        id: prepare_tarball
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          VERSION="${TAG#v}"
+          PKG="dns-over-https"
+          OUTDIR="${PKG}-${VERSION}"
+
+          # Clean previous output
+          rm -rf "${OUTDIR}"
+          mkdir -p "${OUTDIR}"
+
+          # Copy vendor files and create tarball
+          cp -r upstream/vendor "${OUTDIR}/"
+          TAR_FILE="${PKG}-${VERSION}-deps.tar.xz"
+          tar -cJf "$TAR_FILE" "${OUTDIR}"
+
+          # Save tarball name for later steps
+          echo "tar_file=$TAR_FILE" >> $GITHUB_OUTPUT
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dns-over-https-${{ github.event.inputs.tag }}
+          name: dns-over-https ${{ github.event.inputs.tag }}
+          body: "Vendor files for dns-over-https ${{ github.event.inputs.tag }}"
+          files: ${{ steps.prepare_tarball.outputs.tar_file }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
